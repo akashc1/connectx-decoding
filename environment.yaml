@@ -1,0 +1,7 @@
+name: connx-decode
+dependencies:
+  - numpy
+  - pandas
+  - pytorch
+  - einops
+  - tqdm
