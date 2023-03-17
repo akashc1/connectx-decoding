@@ -1,18 +1,19 @@
-from collections import defaultdict
+from pathlib import Path
+import pickle
 import math
-from typing import Tuple
 
+from sklearn import svm
 from brainbox.io.one import SpikeSortingLoader
-from brainbox.plot import peri_event_time_histogram
 from brainbox.singlecell import calculate_peths
 from ibllib.atlas import AllenAtlas
-import matplotlib.pyplot as plt
 import numpy as np
 from one.api import ONE
 import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn import metrics
 
-
-ROIS = ['CM', 'DG', 'CA1', 'LP', 'MRN', 'PTLp', 'APN']
+# ROIS = ['CM', 'DG', 'CA1', 'LP', 'MRN', 'PTLp', 'APN']
+ROIS = ['DG', 'CA1', 'LP', 'MRN', 'PTLp', 'APN']
 EIDS = [
     '4b7fbad4-f6de-43b4-9b15-c7c7ef44db4b',
     'e2b845a1-e313-4a08-bc61-a5f662ed295e',
@@ -168,9 +169,24 @@ def get_all_recording_data():
 
 
 def get_data_array():
-    eid_to_data = get_all_recording_data()
+    if (raw_data_pkl := Path.cwd() / 'data' / 'raw_data.pkl').exists():
+        print(f"Loading cached data from {str(raw_data_pkl)}")
+        with open(raw_data_pkl, 'rb') as f:
+            eid_to_data = pickle.load(f)
+    else:
+        eid_to_data = get_all_recording_data()
+        print(f"Writing data to cache at {str(raw_data_pkl)}")
+        with open(raw_data_pkl, 'wb') as f:
+            pickle.dump(eid_to_data, f)
+
+    num_blank_trials = 0
     all_inputs, all_outputs = [], []
     for eid, recording in eid_to_data.items():
+        missing_rois = {roi for roi in ROIS if roi not in recording}
+        if missing_rois:
+            print(f"Skipping {eid} since it is missing {missing_rois=}")
+            continue
+
         num_trials = (
             recording[ROIS[0]][-1]['trial_data']['choices'].shape[0]
             + recording[ROIS[0]][1]['trial_data']['choices'].shape[0]
@@ -185,6 +201,10 @@ def get_data_array():
 
             for condition in [-1, 1]:
                 spike_counts = recording[ex_roi][condition]['spike_counts']
+                if spike_counts.shape[1] < 1:
+                    spike_counts = -1 * np.ones((recording[ex_roi][condition]['trial_data']['choices'].shape[0], 5, T))
+                    num_blank_trials += recording[ex_roi][condition]['trial_data']['choices'].shape[0]
+
                 dat = np.mean(spike_counts, axis=1)  # averaging over neurons
 
                 whole_data.append(dat)
@@ -197,13 +217,15 @@ def get_data_array():
             region_inputs.append(whole_data)
             region_outputs.append(whole_outputs)
 
-        all_inputs.append(np.stack(region_inputs))
-        all_outputs.append(np.stack(region_outputs))
+        all_inputs.append(np.stack(region_inputs, 1))
+        all_outputs.append(np.stack(region_outputs, 1))
+        print(f"{eid=} {all_inputs[-1].shape=}")
 
-    all_inputs = np.stack(all_inputs)
-    all_outputs = np.stack(all_outputs)
+    all_inputs = np.concatenate(all_inputs)
+    all_outputs = np.concatenate(all_outputs)
 
     print(all_inputs.shape, all_outputs.shape)
+    print("Num blank trials: ", num_blank_trials)
 
     return all_inputs, all_outputs
 
@@ -218,3 +240,8 @@ if __name__ == '__main__':
     ba = AllenAtlas()
     all_inputs, all_outputs = get_data_array()
     print(f"{all_inputs.shape=}, {all_outputs.shape=}")
+    X_train, X_test, y_train, y_test = train_test_split(all_inputs, all_outputs, test_size=0.2)
+    clf = svm.SVC(kernel='rbf')
+    clf.fit(X_train.reshape(X_train.shape[0], -1), y_train[:, 0])
+    y_pred = clf.predict(X_test.reshape(X_test.shape[0], -1))
+    print(" accuracy:", metrics.accuracy_score(y_test[:, 0], y_pred))
