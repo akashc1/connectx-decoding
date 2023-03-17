@@ -2,6 +2,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from util.data import get_connectome_weights
+
 
 class MLP(nn.Module):
     def __init__(self, n_layers, inc, hiddenc, outc):
@@ -32,7 +34,6 @@ class RegionAttention(nn.Module):
         d_out=64,
         num_attn_heads=4,
         use_custom_weights=False,
-        target_regions=None,
     ):
         super().__init__()
 
@@ -46,7 +47,7 @@ class RegionAttention(nn.Module):
         self.val_proj = nn.Linear(d_in, d_hidden)
 
         if use_custom_weights:
-            custom_weights = get_connectome_weights(target_regions)
+            custom_weights = get_connectome_weights()
             self.attn_mask = torch.tensor(custom_weights, requires_grad=False)
         else:
             self.key_proj = nn.Linear(d_in, d_hidden)
@@ -60,11 +61,11 @@ class RegionAttention(nn.Module):
 
         if self.use_custom_weights:
             val = val * attn_mask.byte() if attn_mask is not None else val
-            return self.attn_mask @ val
+            return self.out_proj(self.attn_mask @ val)
 
-        k = self.key_proj(x).view(B, R, self.num_heads, C // self.num_heads).transpose(1, 2)
-        q = self.query_proj(x).view(B, R, self.num_heads, C // self.num_heads).transpose(1, 2)
-        v = val.view(B, R, self.num_heads, C // self.num_heads).transpose(1, 2)
+        k = self.key_proj(x).view(B, R, self.num_heads, self.d_hidden // self.num_heads).transpose(1, 2)
+        q = self.query_proj(x).view(B, R, self.num_heads, self.d_hidden // self.num_heads).transpose(1, 2)
+        v = val.view(B, R, self.num_heads, self.d_hidden // self.num_heads).transpose(1, 2)
 
         raw_scores = (q @ k.transpose(-2, -1)) / (self.d_hidden ** -0.5)
         if attn_mask is not None:
@@ -84,44 +85,38 @@ class MovementPredictor(nn.Module):
     def __init__(
         self,
         num_regions=7,
-        hidden_dim=64,
-        conv_w=7,
-        num_convs=3,
+        hidden_dim=256,
+        conv_w=25,
+        num_convs=12,
         t_in=120,
-        squash_neurons='mean',
         num_input_neurons=None,
-        flatten_dim=None,
-        attn_hidden_dim=128,
+        attn_hidden_dim=256,
         use_connectome_attn_weights=False,
-        target_regions=None,
     ):
         super().__init__()
 
         self.use_connectome_attn_weights = use_connectome_attn_weights
         self.hidden_dim = hidden_dim
 
-        self.region_embed = nn.Embedding(num_regions, hidden_dim, padding_idx=-1)
+        self.region_embed = nn.Embedding(num_regions, hidden_dim)
 
         # An initial convolution to preprocess everything
-        self.squash_neurons = squash_neurons
         num_inputs = num_input_neurons or 1
         self.initial_conv = nn.Conv1d(num_inputs, hidden_dim, conv_w, padding=conv_w // 2)
 
         # Some more convs to process information across time
         convs = []
-        for _ in num_convs:
+        for _ in range(num_convs):
             convs.append(nn.Conv1d(hidden_dim, hidden_dim, conv_w, padding=conv_w // 2))
-            convs.append(nn.BatchNorm1d(hidden_dim))
+            # convs.append(nn.BatchNorm1d(hidden_dim))
             convs.append(nn.ReLU())
         self.convs = nn.Sequential(*convs)
 
-        self.flatten_dim = flatten_dim or hidden_dim
-        self.pre_attn_proj = nn.Linear(hidden_dim * t_in, flatten_dim)
+        self.pre_attn_proj = nn.Linear(hidden_dim * t_in, hidden_dim)
 
         self.attn = RegionAttention(
-            flatten_dim, attn_hidden_dim, hidden_dim,
+            hidden_dim, attn_hidden_dim, hidden_dim,
             use_custom_weights=use_connectome_attn_weights,
-            target_regions=target_regions,
         )
         self.mlp = MLP(3, hidden_dim, hidden_dim, hidden_dim // 2)
         self.final_proj = nn.Linear(num_regions * (hidden_dim // 2), 1)
@@ -130,15 +125,16 @@ class MovementPredictor(nn.Module):
         """
         x: (B, num_regions, num_neurons, d_time)
         """
-        B, num_regions, num_neurons, d_time = x.shape
+        B, num_regions, d_time = x.shape
         assert num_regions == self.region_embed.weight.shape[0]
-        x = x.view(-1, num_neurons, d_time)
+        x = x.view(-1, 1, d_time).float()
 
         for c in (self.initial_conv, F.relu, self.convs):
             x = c(x)
 
         x = x.view(B, num_regions, -1)
         x = F.relu(self.pre_attn_proj(x))
+        x = x + self.region_embed(torch.arange(num_regions).to(x.device))[None, ...]
         x = F.relu(self.attn(x))
         x = F.gelu(self.mlp(x))
         return self.final_proj(x.flatten(-2))

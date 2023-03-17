@@ -2,6 +2,7 @@ import argparse
 import csv
 
 from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 import torch
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
@@ -9,25 +10,34 @@ from tqdm.auto import tqdm
 
 from models import MovementPredictor
 from util.misc import set_seed, save_model
+from util.data import get_data_array, ROIS
 from dataset import MovementDataset
-
-REGIONS = []
 
 
 def get_data(regions=None, batch_size=16):
-    regions = regions or REGIONS
-    ...
+    all_input, all_output = get_data_array()
+    xtr, xts, ytr, yts = train_test_split(all_input, all_output, test_size=0.1, shuffle=True)
+    tr_dataset = MovementDataset(list(zip(xtr, ytr)))
+    ts_dataset = MovementDataset(list(zip(xts, yts)))
+
+    return tr_dataset, ts_dataset
 
 
-def train_one_epoch(model, optimizer, train_dataloader, log_writer, log_loss_every=100):
+def train_one_epoch(model, optimizer, train_dataloader, log_writer, log_loss_every=5):
 
     losses = []
-    for step, (x, y) in enumerate(tqdm(train_dataloader)):
-        x, y = x.to(DEVICE), y.to(DEVICE)
+    _x, _y = next(iter(train_dataloader))
+    # for step, (x, y) in enumerate(tqdm(train_dataloader)):
+    for step in range(3000):
+        # if _x is None and _y is None:
+        #     _x, _y = x, y
 
-        optimizer.zero_grad()
+        x, y = _x.clone().to(DEVICE), _y.clone().to(DEVICE)
+        # print(x[0, 0, 0])
+        y.masked_fill_(y < 0, 0)
 
         logits = model(x).view(-1)
+        optimizer.zero_grad()
         loss = F.binary_cross_entropy_with_logits(logits, y.view(-1), reduction='mean')
 
         loss.backward()
@@ -43,8 +53,8 @@ def train_one_epoch(model, optimizer, train_dataloader, log_writer, log_loss_eve
 def run_testing(model, test_dataloader):
     preds, gt = [], []
     for step, (x, y) in enumerate(tqdm(test_dataloader, desc='Test loop')):
-        x, y = x.to(DEVICE), y.to(DEVICE)
-        logits = model(x).view(-1).sigmoid()
+        x, y = x.to(DEVICE).float(), y.to(DEVICE)
+        logits = model(x).view(-1)
 
         pred = torch.zeros_like(logits).byte()
         pred.masked_fill_(logits < 0, -1)
@@ -59,8 +69,8 @@ def run_testing(model, test_dataloader):
 def main(args: argparse.Namespace):
     set_seed(args.random_seed)
     model = MovementPredictor(
+        num_regions=len(ROIS),
         use_connectome_attn_weights=args.use_connectome_weights,
-        target_regions=REGIONS,
     ).to(DEVICE)
 
     optimizer = torch.optim.Adam(
@@ -68,6 +78,10 @@ def main(args: argparse.Namespace):
         args.learning_rate,
         weight_decay=args.weight_decay,
     )
+
+    tr_dataset, ts_dataset = get_data()
+    train_dl = DataLoader(tr_dataset, batch_size=args.batch_size, num_workers=4)
+    test_dl = DataLoader(ts_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
     with (
         open(args.train_log_path, 'w') as tr_log_fh,
@@ -93,9 +107,9 @@ def main(args: argparse.Namespace):
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('-c', '--use-connectome-weights', action='store_true')
-    p.add_argument('-e', '--num-epochs', default=5, type=int)
+    p.add_argument('-e', '--num-epochs', default=20, type=int)
     p.add_argument('-s', '--random-seed', default=42, type=int)
-    p.add_argument('-b', '--batch-size', default=16, type=int)
+    p.add_argument('-b', '--batch-size', default=64, type=int)
     p.add_argument('-lr', '--learning-rate', default=3e-4, type=float, help='Learning rate')
     p.add_argument('-w', '--weight-decay', default=0, type=float, help='Weight decay')
     p.add_argument('-m', '--model-path', default='model.pt', type=str)

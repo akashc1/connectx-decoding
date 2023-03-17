@@ -116,8 +116,8 @@ def check_num_ses(list_of_eids):
     return len(list(roi_intersection))
 
 
-def get_connectome_weights(file):
-    projectome = pd.read_excel('proj_strengths_sup3.xlsx', sheet_name='W_ipsi', index_col=0)
+def get_connectome_weights(file='proj_strengths.xlsx'):
+    projectome = pd.read_excel(file, sheet_name='W_ipsi', index_col=0)
     strengths = np.zeros([7, 7])
     for i, source in enumerate(ROIS):
         for j, target in enumerate(ROIS):
@@ -227,7 +227,7 @@ def get_data_array():
     print(all_inputs.shape, all_outputs.shape)
     print("Num blank trials: ", num_blank_trials)
 
-    return all_inputs, all_outputs
+    return all_inputs, all_outputs[:, 0]
 
 
 if __name__ == '__main__':
