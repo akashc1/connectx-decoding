@@ -12,7 +12,21 @@ from one.api import ONE
 import pandas as pd
 
 
-def remove_nans(lis):
+ROIS = ['CM', 'DG', 'CA1', 'LP', 'MRN', 'PTLp', 'APN']
+EIDS = [
+    '4b7fbad4-f6de-43b4-9b15-c7c7ef44db4b',
+    'e2b845a1-e313-4a08-bc61-a5f662ed295e',
+    'f312aaec-3b6f-44b3-86b4-3a0c119c0438',
+    '6c6b0d06-6039-4525-a74b-58cfaa1d3a60',
+    '3e6a97d3-3991-49e2-b346-6948cb4580fb',
+    'ecb5520d-1358-434c-95ec-93687ecd1396',
+    '2bdf206a-820f-402f-920a-9e86cd5388a4',
+    'b22f694e-4a34-4142-ab9d-2556c3487086',
+    '9b528ad0-4599-4a55-9148-96cc1d93fb24',
+]
+
+
+def remove_nans(lis, indices):
     tes = np.array([[i, val] for i, val in enumerate(lis)])
     row_remove = np.argwhere(np.isnan(tes))
     tes = tes[~np.isnan(tes).any(axis=1)]
@@ -20,7 +34,13 @@ def remove_nans(lis):
     return tes, row_remove[:, 0]
 
 
-def get_spikedata(eid):
+def get_spikedata_pid(PID):
+    sl = SpikeSortingLoader(pid=PID, one=one, atlas=ba)
+    spikes, clusters, channels = sl.load_spike_sorting()
+    clusters = sl.merge_clusters(spikes, clusters, channels)
+    return spikes, clusters, channels
+
+def get_spikedata_eid(eid):
     PIDlist = one.eid2pid(eid)
     datalist = []
     print(PIDlist)
@@ -33,26 +53,19 @@ def get_spikedata(eid):
 
 
 def select_trials(trial_data, trial_condition, condition):
-    indices = [
-        i
-        for i, trial in enumerate(trial_data)
-        if trial_condition[i] == condition and not math.isnan(trial)
-    ]
+    indices = [i for i, trial in enumerate(trial_data) if trial_condition[i] == condition and not math.isnan(trial)]
     result = [trial for i, trial in enumerate(trial_data) if i in indices]
     return result, indices
 
 
-def get_matrices(trials, spikes, relev_neur, param='choice', param_condition=-1):
+def get_matrices(trials, spikes, relev_neur, param = 'choice', param_condition = -1, trial_def = [3,3,0.05]):
 
-    move_trials, trial_indices = select_trials(
-        trials['firstMovement_times'],
-        trials[param],
-        param_condition,
-    )
+
+    move_trials, trial_indices = select_trials(trials['firstMovement_times'], trials[param], param_condition)
     print(len(move_trials), move_trials)
     print(len(trial_indices), trial_indices)
 
-    # 0D behavioral parameters
+    #0D behavioral parameters 
     movement_choices = trials.choice[trial_indices]
     trial_results = trials.feedbackType[trial_indices]
     print(len(movement_choices))
@@ -60,8 +73,7 @@ def get_matrices(trials, spikes, relev_neur, param='choice', param_condition=-1)
     peth, spike_counts = calculate_peths(
         spikes.times, spikes.clusters, relev_neur,
         move_trials,
-        pre_time=3, post_time=3, bin_size=0.05, smoothing=0,
-    )
+        pre_time=trial_def[0], post_time=trial_def[1], bin_size=trial_def[2], smoothing=0)
 
     print('peth["tscale"] contains the timebin centers relative to the event')
     print(f'\npeth["means"] is shaped: {peth["means"].shape}')
@@ -87,7 +99,14 @@ def get_matrices(trials, spikes, relev_neur, param='choice', param_condition=-1)
 
 def gen_eidlist(roi_name):
     ses = one.alyx.rest('sessions', 'list', atlas_acronym=roi_name)
-    return [i['id'] for i in ses]
+    eids = [i['id'] for i in ses]
+    return eids
+
+
+def gen_pidlist(roi_name):
+    ses = one.alyx.rest('insertions', 'list', atlas_acronym=roi_name)
+    pids = [i['id'] for i in ses]
+    return pids
 
 
 def check_num_ses(list_of_eids):
@@ -96,18 +115,97 @@ def check_num_ses(list_of_eids):
     return len(list(roi_intersection))
 
 
-def get_region_mapping(csv_path='proj_brainregions.csv') -> Tuple[dict, dict]:
-    regions = pd.read_csv(csv_path).columns
-    region2ind, ind2region = {}, {}
-    for i, region in enumerate(regions):
-        if region == 'fiber tracts':  # strange one we can ignore
-            continue
+def get_connectome_weights(file):
+    projectome = pd.read_excel('proj_strengths_sup3.xlsx', sheet_name='W_ipsi', index_col=0)
+    strengths = np.zeros([7, 7])
+    for i, source in enumerate(ROIS):
+        for j, target in enumerate(ROIS):
+            # print(round(projectome.loc[source, target], 2))
+            strengths[i, j] = projectome.loc[source, target]
+        if np.sum(strengths[i, :]) > 0:
+            strengths[i, :] /= np.sum(strengths[i, :])
 
-        region = region.split('.')[0]
-        region2ind[region] = i
-        ind2region[i] = region
+    return strengths
 
-    return region2ind, ind2region
+
+def get_data_per_recording(eid, corr_regions):
+    datalist = get_spikedata_eid(eid)
+    trials = one.load_object(eid, 'trials')
+
+    region_2_relevneur = {}
+    region_2_data = {}
+
+    for region in corr_regions:
+        probe = 0
+        relev_neur = [i for i, acronym in enumerate(datalist[probe][1]['acronym']) if region in acronym]
+        if len(relev_neur) == 0:
+            if len(datalist) == 1:
+                continue
+            probe = 1
+            relev_neur = [i for i, acronym in enumerate(datalist[probe][1]['acronym']) if region in acronym]
+        region_2_relevneur[region] = relev_neur
+
+        dic = {}
+        for condition in [-1, 1]:
+            mini_dic = {}
+            peth, spike_counts, trial_data = get_matrices(trials, datalist[probe][0], relev_neur, param='choice', param_condition=condition)
+            mini_dic['peth'] = peth
+            mini_dic['spike_counts'] = spike_counts
+            mini_dic['trial_data'] = trial_data
+            dic[condition] = mini_dic
+        region_2_data[region] = dic
+
+    return region_2_data
+
+
+def get_all_recording_data():
+    whole_dataset = {}
+    for eid in EIDS:
+        region_2_dat = get_data_per_recording(eid, ROIS)
+        whole_dataset[eid] = region_2_dat
+
+    return whole_dataset
+
+
+def get_data_array():
+    eid_to_data = get_all_recording_data()
+    all_inputs, all_outputs = [], []
+    for eid, recording in eid_to_data.items():
+        num_trials = (
+            recording[ROIS[0]][-1]['trial_data']['choices'].shape[0]
+            + recording[ROIS[0]][1]['trial_data']['choices'].shape[0]
+        )
+        T = recording[ROIS[0]][1]['spike_counts'].shape[-1]
+        print(f"Recording {eid}: {num_trials} trials, {T=}")
+
+        region_inputs, region_outputs = [], []
+        for ex_roi in ROIS:
+            whole_data = []
+            whole_outputs = []
+
+            for condition in [-1, 1]:
+                spike_counts = recording[ex_roi][condition]['spike_counts']
+                dat = np.mean(spike_counts, axis=1)  # averaging over neurons
+
+                whole_data.append(dat)
+                whole_outputs.append(recording[ex_roi][condition]['trial_data']['choices'])
+
+            whole_data = np.concatenate(whole_data)
+            whole_outputs = np.concatenate(whole_outputs)
+            print(whole_data.shape, whole_outputs.shape)
+
+            region_inputs.append(whole_data)
+            region_outputs.append(whole_outputs)
+
+        all_inputs.append(np.stack(region_inputs))
+        all_outputs.append(np.stack(region_outputs))
+
+    all_inputs = np.stack(all_inputs)
+    all_outputs = np.stack(all_outputs)
+
+    print(all_inputs.shape, all_outputs.shape)
+
+    return all_inputs, all_outputs
 
 
 if __name__ == '__main__':
@@ -118,19 +216,5 @@ if __name__ == '__main__':
         silent=True,
     )
     ba = AllenAtlas()
-
-    r2i, i2r = get_region_mapping()
-
-    roi2eids = {}
-    eids2rois = defaultdict(list)
-    for roi in r2i:
-        eids = gen_eidlist(roi)
-        roi2eids[roi] = eids
-        for e in eids:
-            eids2rois[e].append(roi)
-
-    most_rois_eid = max(eids2rois, key=lambda eid: len(eids2rois[eid]))
-    print(f"EID with most number of ROIs: {most_rois_eid}")
-    print(f"{len(eids2rois)=} total EIDs")
-
-
+    all_inputs, all_outputs = get_data_array()
+    print(f"{all_inputs.shape=}, {all_outputs.shape=}")
