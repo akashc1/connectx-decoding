@@ -23,21 +23,22 @@ def get_data(regions=None, batch_size=16):
     return tr_dataset, ts_dataset
 
 
-def train_one_epoch(model, optimizer, train_dataloader, log_writer, log_loss_every=5):
+def train_one_epoch(model, optimizer, train_dataloader, log_writer, epoch, log_loss_every=5):
 
     losses = []
-    _x, _y = next(iter(train_dataloader))
-    # for step, (x, y) in enumerate(tqdm(train_dataloader)):
-    for step in range(3000):
+    # _x, _y = next(iter(train_dataloader))
+    for step, (x, y) in enumerate(tqdm(train_dataloader)):
+    # for step in range(3000):
         # if _x is None and _y is None:
         #     _x, _y = x, y
 
-        x, y = _x.clone().to(DEVICE), _y.clone().to(DEVICE)
+        # x, y = _x.clone().to(DEVICE), _y.clone().to(DEVICE)
         # print(x[0, 0, 0])
+        x, y = x.to(DEVICE).float(), y.to(DEVICE)
         y.masked_fill_(y < 0, 0)
 
-        logits = model(x).view(-1)
         optimizer.zero_grad()
+        logits = model(x).view(-1)
         loss = F.binary_cross_entropy_with_logits(logits, y.view(-1), reduction='mean')
 
         loss.backward()
@@ -45,12 +46,18 @@ def train_one_epoch(model, optimizer, train_dataloader, log_writer, log_loss_eve
 
         if (step + 1) % log_loss_every == 0:
             losses.append(loss.item())
-            log_writer.writerow({'step': step, 'train_loss': losses[-1]})
-            print(f"[Step {step}] Loss: {losses[-1]:.3f}")
+            grad_norm = torch.norm(
+                torch.cat([p.view(-1) for p in model.parameters()])
+            )
+            log_writer.writerow(
+                {'step': step, 'train_loss': losses[-1], 'grad_norm': grad_norm.item()}
+            )
+            print(f"[Step {step}] Loss: {losses[-1]:.3f} Grad norm: {grad_norm.item():.3f}")
 
 
 @torch.no_grad()
 def run_testing(model, test_dataloader):
+    model.eval()
     preds, gt = [], []
     for step, (x, y) in enumerate(tqdm(test_dataloader, desc='Test loop')):
         x, y = x.to(DEVICE).float(), y.to(DEVICE)
@@ -87,18 +94,17 @@ def main(args: argparse.Namespace):
         open(args.train_log_path, 'w') as tr_log_fh,
         open(args.test_log_path, 'w') as ts_log_fh,
     ):
-        tr_writer = csv.DictWriter(tr_log_fh, ['step', 'train_loss'])
+        tr_writer = csv.DictWriter(tr_log_fh, ['step', 'train_loss', 'grad_norm'])
         ts_writer = csv.DictWriter(ts_log_fh, ['epoch', 'test_accuracy'])
         tr_writer.writeheader()
         ts_writer.writeheader()
 
         for e in tqdm(range(args.num_epochs)):
             model.train()
-            train_one_epoch(model, optimizer, train_dl, tr_writer)
+            train_one_epoch(model, optimizer, train_dl, tr_writer, e)
 
-            model.eval()
             acc = run_testing(model, test_dl)
-            ts_writer.writerow({'test_accuracy': acc})
+            ts_writer.writerow({'epoch': e, 'test_accuracy': acc})
             print(f"Epoch {e}: test accuracy {acc:.3f}")
 
     save_model(model, args.model_path)

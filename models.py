@@ -32,7 +32,7 @@ class RegionAttention(nn.Module):
         d_in=64,
         d_hidden=128,
         d_out=64,
-        num_attn_heads=4,
+        num_attn_heads=1,
         use_custom_weights=False,
     ):
         super().__init__()
@@ -87,7 +87,7 @@ class MovementPredictor(nn.Module):
         num_regions=7,
         hidden_dim=256,
         conv_w=25,
-        num_convs=12,
+        num_convs=3,
         t_in=120,
         num_input_neurons=None,
         attn_hidden_dim=256,
@@ -108,7 +108,6 @@ class MovementPredictor(nn.Module):
         convs = []
         for _ in range(num_convs):
             convs.append(nn.Conv1d(hidden_dim, hidden_dim, conv_w, padding=conv_w // 2))
-            # convs.append(nn.BatchNorm1d(hidden_dim))
             convs.append(nn.ReLU())
         self.convs = nn.Sequential(*convs)
 
@@ -127,7 +126,7 @@ class MovementPredictor(nn.Module):
         """
         B, num_regions, d_time = x.shape
         assert num_regions == self.region_embed.weight.shape[0]
-        x = x.view(-1, 1, d_time).float()
+        x = x.view(-1, 1, d_time)
 
         for c in (self.initial_conv, F.relu, self.convs):
             x = c(x)
