@@ -3,6 +3,23 @@ from torch import nn
 from torch.nn import functional as F
 
 
+class MLP(nn.Module):
+    def __init__(self, n_layers, inc, hiddenc, outc):
+        super().__init__()
+        self.initial_proj = nn.Linear(inc, hiddenc)
+
+        layers = []
+        for _ in range(n_layers):
+            layers.append(nn.Linear(hiddenc, hiddenc))
+            layers.append(nn.GELU())
+
+        self.mlp = nn.Sequential(*layers)
+        self.out_proj = nn.Linear(hiddenc, outc)
+
+    def forward(self, x):
+        return self.out_proj(self.mlp(F.relu(self.initial_proj(x))))
+
+
 class RegionAttention(nn.Module):
     """
     Compute attention over region tokens. Optionally accept hardcoded attention weights
@@ -37,19 +54,21 @@ class RegionAttention(nn.Module):
 
         self.out_proj = nn.Linear(d_hidden, d_out)
 
-    def forward(self, x, attn_mask):
+    def forward(self, x, attn_mask=None):
         B, R, C = x.shape
         val = self.val_proj(x)
 
         if self.use_custom_weights:
-            return self.attn_mask @ (val * attn_mask.byte())
+            val = val * attn_mask.byte() if attn_mask is not None else val
+            return self.attn_mask @ val
 
         k = self.key_proj(x).view(B, R, self.num_heads, C // self.num_heads).transpose(1, 2)
         q = self.query_proj(x).view(B, R, self.num_heads, C // self.num_heads).transpose(1, 2)
         v = val.view(B, R, self.num_heads, C // self.num_heads).transpose(1, 2)
 
         raw_scores = (q @ k.transpose(-2, -1)) / (self.d_hidden ** -0.5)
-        raw_scores = raw_scores.masked_fill(attn_mask == 0, float('-inf'))
+        if attn_mask is not None:
+            raw_scores = raw_scores.masked_fill(attn_mask == 0, float('-inf'))
         attn_scores = F.softmax(raw_scores, -1)
         out = (attn_scores @ v).transpose(1, 2).contiguous().view(B, R, self.d_hidden)
 
@@ -64,7 +83,7 @@ class MovementPredictor(nn.Module):
 
     def __init__(
         self,
-        num_regions=10,
+        num_regions=7,
         hidden_dim=64,
         conv_w=7,
         num_convs=3,
@@ -72,7 +91,9 @@ class MovementPredictor(nn.Module):
         squash_neurons='mean',
         num_input_neurons=None,
         flatten_dim=None,
+        attn_hidden_dim=128,
         use_connectome_attn_weights=False,
+        target_regions=None,
     ):
         super().__init__()
 
@@ -95,11 +116,15 @@ class MovementPredictor(nn.Module):
         self.convs = nn.Sequential(*convs)
 
         self.flatten_dim = flatten_dim or hidden_dim
-        self.pre_attn_proj = (
-            nn.Linear(hidden_dim * t_in, flatten_dim)
-            if flatten_dim is not None
-            else nn.Identity()
+        self.pre_attn_proj = nn.Linear(hidden_dim * t_in, flatten_dim)
+
+        self.attn = RegionAttention(
+            flatten_dim, attn_hidden_dim, hidden_dim,
+            use_custom_weights=use_connectome_attn_weights,
+            target_regions=target_regions,
         )
+        self.mlp = MLP(3, hidden_dim, hidden_dim, hidden_dim // 2)
+        self.final_proj = nn.Linear(num_regions * (hidden_dim // 2), 1)
 
     def forward(self, x):
         """
@@ -113,4 +138,7 @@ class MovementPredictor(nn.Module):
             x = c(x)
 
         x = x.view(B, num_regions, -1)
-        x = self.pre_attn_proj(x)
+        x = F.relu(self.pre_attn_proj(x))
+        x = F.relu(self.attn(x))
+        x = F.gelu(self.mlp(x))
+        return self.final_proj(x.flatten(-2))
