@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from models import MovementPredictor
-from util.misc import set_seed, save_model
+from util.misc import set_seed, save_model, grad_norm
 from util.data import get_data_array, ROIS
 from dataset import MovementDataset
 
@@ -26,33 +26,29 @@ def get_data(regions=None, batch_size=16):
 def train_one_epoch(model, optimizer, train_dataloader, log_writer, epoch, log_loss_every=5):
 
     losses = []
-    # _x, _y = next(iter(train_dataloader))
     for step, (x, y) in enumerate(tqdm(train_dataloader)):
-    # for step in range(3000):
-        # if _x is None and _y is None:
-        #     _x, _y = x, y
-
-        # x, y = _x.clone().to(DEVICE), _y.clone().to(DEVICE)
-        # print(x[0, 0, 0])
         x, y = x.to(DEVICE).float(), y.to(DEVICE)
-        y.masked_fill_(y < 0, 0)
+        y.masked_fill_(y < 0, 0)  # {-1, 1} -> {0, 1} for BCE loss
 
         optimizer.zero_grad()
         logits = model(x).view(-1)
         loss = F.binary_cross_entropy_with_logits(logits, y.view(-1), reduction='mean')
 
         loss.backward()
+
+        initial_norm = grad_norm(model)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.001)
+        clipped_norm = grad_norm(model)
+
         optimizer.step()
 
         if (step + 1) % log_loss_every == 0:
             losses.append(loss.item())
-            grad_norm = torch.norm(
-                torch.cat([p.view(-1) for p in model.parameters()])
-            )
             log_writer.writerow(
-                {'step': step, 'train_loss': losses[-1], 'grad_norm': grad_norm.item()}
+                {'step': step, 'train_loss': losses[-1], 'grad_norm': clipped_norm.item()}
             )
             print(f"[Step {step}] Loss: {losses[-1]:.3f} Grad norm: {grad_norm.item():.3f}")
+            print(f"Initial norm: {initial_norm.item()}, clipped norm: {clipped_norm.item()}")
 
 
 @torch.no_grad()
@@ -116,7 +112,7 @@ def parse_args():
     p.add_argument('-e', '--num-epochs', default=20, type=int)
     p.add_argument('-s', '--random-seed', default=42, type=int)
     p.add_argument('-b', '--batch-size', default=64, type=int)
-    p.add_argument('-lr', '--learning-rate', default=3e-4, type=float, help='Learning rate')
+    p.add_argument('-lr', '--learning-rate', default=3e-6, type=float, help='Learning rate')
     p.add_argument('-w', '--weight-decay', default=0, type=float, help='Weight decay')
     p.add_argument('-m', '--model-path', default='model.pt', type=str)
     p.add_argument('--train-log-path', default='train_logs.csv')

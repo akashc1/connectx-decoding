@@ -13,3 +13,7 @@ def set_seed(seed):
 
 def save_model(model, dst):
     torch.save(model.state_dict(), dst)
+
+
+def grad_norm(model):
+    return torch.cat([p.view(-1) for p in model.parameters()]).norm()
