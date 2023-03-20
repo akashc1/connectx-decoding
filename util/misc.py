@@ -16,4 +16,4 @@ def save_model(model, dst):
 
 
 def grad_norm(model):
-    return torch.cat([p.view(-1) for p in model.parameters()]).norm()
+    return torch.cat([p.grad.view(-1) for p in model.parameters()]).norm()

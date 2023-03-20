@@ -36,19 +36,17 @@ def train_one_epoch(model, optimizer, train_dataloader, log_writer, epoch, log_l
 
         loss.backward()
 
-        initial_norm = grad_norm(model)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.001)
-        clipped_norm = grad_norm(model)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=3)
+        gnorm = grad_norm(model)
 
         optimizer.step()
 
         if (step + 1) % log_loss_every == 0:
             losses.append(loss.item())
             log_writer.writerow(
-                {'step': step, 'train_loss': losses[-1], 'grad_norm': clipped_norm.item()}
+                {'step': step, 'train_loss': losses[-1], 'grad_norm': gnorm.item()}
             )
-            print(f"[Step {step}] Loss: {losses[-1]:.3f} Grad norm: {grad_norm.item():.3f}")
-            print(f"Initial norm: {initial_norm.item()}, clipped norm: {clipped_norm.item()}")
+            print(f"[Step {step}] Loss: {losses[-1]:.3f} Grad norm: {gnorm.item():.3f}")
 
 
 @torch.no_grad()
@@ -76,7 +74,7 @@ def main(args: argparse.Namespace):
         use_connectome_attn_weights=args.use_connectome_weights,
     ).to(DEVICE)
 
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.SGD(
         model.parameters(),
         args.learning_rate,
         weight_decay=args.weight_decay,
@@ -112,7 +110,7 @@ def parse_args():
     p.add_argument('-e', '--num-epochs', default=20, type=int)
     p.add_argument('-s', '--random-seed', default=42, type=int)
     p.add_argument('-b', '--batch-size', default=64, type=int)
-    p.add_argument('-lr', '--learning-rate', default=3e-6, type=float, help='Learning rate')
+    p.add_argument('-lr', '--learning-rate', default=0.1, type=float, help='Learning rate')
     p.add_argument('-w', '--weight-decay', default=0, type=float, help='Weight decay')
     p.add_argument('-m', '--model-path', default='model.pt', type=str)
     p.add_argument('--train-log-path', default='train_logs.csv')
