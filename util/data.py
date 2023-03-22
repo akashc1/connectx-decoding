@@ -41,6 +41,7 @@ def get_spikedata_pid(PID):
     clusters = sl.merge_clusters(spikes, clusters, channels)
     return spikes, clusters, channels
 
+
 def get_spikedata_eid(eid):
     PIDlist = one.eid2pid(eid)
     datalist = []
@@ -231,6 +232,7 @@ def get_data_array():
 
 
 if __name__ == '__main__':
+    Path('data').mkdir(exist_ok=True)  # used for caching IBL data
     one = ONE(
         cache_dir='data',
         base_url='https://openalyx.internationalbrainlab.org',
