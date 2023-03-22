@@ -110,7 +110,7 @@ def parse_args():
     p.add_argument('-e', '--num-epochs', default=20, type=int)
     p.add_argument('-s', '--random-seed', default=42, type=int)
     p.add_argument('-b', '--batch-size', default=64, type=int)
-    p.add_argument('-lr', '--learning-rate', default=0.1, type=float, help='Learning rate')
+    p.add_argument('-lr', '--learning-rate', default=3e-4, type=float, help='Learning rate')
     p.add_argument('-w', '--weight-decay', default=0, type=float, help='Weight decay')
     p.add_argument('-m', '--model-path', default='model.pt', type=str)
     p.add_argument('--train-log-path', default='train_logs.csv')

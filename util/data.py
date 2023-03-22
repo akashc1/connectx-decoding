@@ -141,8 +141,8 @@ def get_connectome_weights(file='proj_strengths.xlsx'):
     strengths = np.zeros([7, 7])
     for i, source in enumerate(ROIS):
         for j, target in enumerate(ROIS):
-            # print(round(projectome.loc[source, target], 2))
             strengths[i, j] = projectome.loc[source, target]
+
         if np.sum(strengths[i, :]) > 0:
             strengths[i, :] /= np.sum(strengths[i, :])
 
@@ -315,6 +315,6 @@ if __name__ == '__main__':
     print(f"{all_inputs.shape=}, {all_outputs.shape=}")
     X_train, X_test, y_train, y_test = train_test_split(all_inputs, all_outputs, test_size=0.2)
     clf = svm.SVC(kernel='rbf')
-    clf.fit(X_train.reshape(X_train.shape[0], -1), y_train[:, 0])
+    clf.fit(X_train.reshape(X_train.shape[0], -1), y_train)
     y_pred = clf.predict(X_test.reshape(X_test.shape[0], -1))
-    print(" accuracy:", metrics.accuracy_score(y_test[:, 0], y_pred))
+    print(" accuracy:", metrics.accuracy_score(y_test, y_pred))
