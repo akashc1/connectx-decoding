@@ -12,19 +12,13 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn import metrics
 
-# ROIS = ['CM', 'DG', 'CA1', 'LP', 'MRN', 'PTLp', 'APN']
-ROIS = ['DG', 'CA1', 'LP', 'MRN', 'PTLp', 'APN']
+ROIS = ['STRv', 'STRd', 'MOp', 'MOs']
 EIDS = [
-    '4b7fbad4-f6de-43b4-9b15-c7c7ef44db4b',
-    'e2b845a1-e313-4a08-bc61-a5f662ed295e',
-    'f312aaec-3b6f-44b3-86b4-3a0c119c0438',
-    '6c6b0d06-6039-4525-a74b-58cfaa1d3a60',
-    '3e6a97d3-3991-49e2-b346-6948cb4580fb',
-    'ecb5520d-1358-434c-95ec-93687ecd1396',
-    '2bdf206a-820f-402f-920a-9e86cd5388a4',
-    'b22f694e-4a34-4142-ab9d-2556c3487086',
-    '9b528ad0-4599-4a55-9148-96cc1d93fb24',
+    'ee8b36de-779f-4dea-901f-e0141c95722b',
+    '81a78eac-9d36-4f90-a73a-7eb3ad7f770b',
+    '88d24c31-52e4-49cc-9f32-6adbeb9eba87'
 ]
+FAMILY_DIC = {'MOp': [], 'STRd': ['CP'], 'STRv': ['ACB', 'FS']}
 
 
 def remove_nans(lis, indices):
@@ -55,33 +49,45 @@ def get_spikedata_eid(eid):
 
 
 def select_trials(trial_data, trial_condition, condition):
-    indices = [i for i, trial in enumerate(trial_data) if trial_condition[i] == condition and not math.isnan(trial)]
+    indices = [
+        i
+        for i, trial in enumerate(trial_data)
+        if trial_condition[i] == condition and not math.isnan(trial)
+    ]
     result = [trial for i, trial in enumerate(trial_data) if i in indices]
     return result, indices
 
 
-def get_matrices(trials, spikes, relev_neur, param = 'choice', param_condition = -1, trial_def = [3,3,0.05]):
+def get_matrices(
+    trials,
+    spikes,
+    relev_neur,
+    param='choice',
+    param_condition=-1,
+    trial_def=(3, 3, 0.05),
+    trial_timing='firstMovement_times',
+):
 
+    move_trials, trial_indices = select_trials(trials[trial_timing], trials[param], param_condition)
 
-    move_trials, trial_indices = select_trials(trials['firstMovement_times'], trials[param], param_condition)
-    print(len(move_trials), move_trials)
-    print(len(trial_indices), trial_indices)
-
-    #0D behavioral parameters 
+    # 0D behavioral parameters
     movement_choices = trials.choice[trial_indices]
     trial_results = trials.feedbackType[trial_indices]
-    print(len(movement_choices))
 
     peth, spike_counts = calculate_peths(
         spikes.times, spikes.clusters, relev_neur,
         move_trials,
-        pre_time=trial_def[0], post_time=trial_def[1], bin_size=trial_def[2], smoothing=0)
+        pre_time=trial_def[0],
+        post_time=trial_def[1],
+        bin_size=trial_def[2],
+        smoothing=0,
+    )
 
     print('peth["tscale"] contains the timebin centers relative to the event')
     print(f'\npeth["means"] is shaped: {peth["means"].shape}')
     print('This variable is NxB (neurons x timebins) and contains the mean spike rates over trials')
     print(f'\nspike_counts is shaped: {spike_counts.shape}')
-    print('This variable is TxNxB (trials x neurons x timebins) and contains all spike rates per trial')
+    print('This variable is (trials x neurons x timebins) and contains all spike rates per trial')
 
     # If you just want all the spikes over the entire 0-300 ms window you can sum like this:
     whole_window = np.sum(spike_counts, axis=2)
@@ -92,6 +98,7 @@ def get_matrices(trials, spikes, relev_neur, param = 'choice', param_condition =
 
     trial_data = {}
     trial_data['movement_init_times'] = move_trials
+    print(type(move_trials), len(move_trials))
     trial_data['choices'] = movement_choices
     trial_data['feedback'] = trial_results
     trial_data['trial_indices'] = trial_indices
@@ -117,6 +124,18 @@ def check_num_ses(list_of_eids):
     return len(list(roi_intersection))
 
 
+def is_child_of(child, parent, family_dictionary=FAMILY_DIC):
+    if parent in child:
+        return True
+
+    if parent not in family_dictionary.keys():
+        return False
+    elif child in family_dictionary[parent]:
+        return True
+    else:
+        return False
+
+
 def get_connectome_weights(file='proj_strengths.xlsx'):
     projectome = pd.read_excel(file, sheet_name='W_ipsi', index_col=0)
     strengths = np.zeros([7, 7])
@@ -130,30 +149,78 @@ def get_connectome_weights(file='proj_strengths.xlsx'):
     return strengths
 
 
-def get_data_per_recording(eid, corr_regions):
+def get_data_per_recording(
+    eid,
+    corr_regions,
+    trial_def=(3, 3, 0.05),
+    trial_timing='firstMovement_times',
+):
     datalist = get_spikedata_eid(eid)
     trials = one.load_object(eid, 'trials')
 
-    region_2_relevneur = {}
     region_2_data = {}
 
     for region in corr_regions:
+        relev_neur_list = []
+
         probe = 0
-        relev_neur = [i for i, acronym in enumerate(datalist[probe][1]['acronym']) if region in acronym]
-        if len(relev_neur) == 0:
-            if len(datalist) == 1:
-                continue
+        relev_neur_0 = [
+            i
+            for i, acronym in enumerate(datalist[probe][1]['acronym'])
+            if is_child_of(acronym, region)
+        ]
+
+        if len(relev_neur_0) > 0:  # will be performed if datalist has one probe OR has two probes
+            relev_neur_list.append(relev_neur_0)
+
+        if len(datalist) > 1:  # if two probes
             probe = 1
-            relev_neur = [i for i, acronym in enumerate(datalist[probe][1]['acronym']) if region in acronym]
-        region_2_relevneur[region] = relev_neur
+            relev_neur_1 = [
+                i
+                for i, acronym in enumerate(datalist[probe][1]['acronym'])
+                if is_child_of(acronym, region)
+            ]
+
+            if len(relev_neur_1) > 0:
+                relev_neur_list.append(relev_neur_1)
 
         dic = {}
         for condition in [-1, 1]:
             mini_dic = {}
-            peth, spike_counts, trial_data = get_matrices(trials, datalist[probe][0], relev_neur, param='choice', param_condition=condition)
-            mini_dic['peth'] = peth
-            mini_dic['spike_counts'] = spike_counts
-            mini_dic['trial_data'] = trial_data
+            probe = 0
+            peth, spike_counts, trial_data = get_matrices(
+                trials,
+                datalist[probe][0],
+                relev_neur_list[probe],
+                param='choice',
+                param_condition=condition,
+                trial_def=trial_def,
+                trial_timing=trial_timing,
+            )
+
+            if len(relev_neur_list) > 1:
+                probe = 1
+                peth1, spike_counts1, trial_data1 = get_matrices(
+                    trials,
+                    datalist[probe][0],
+                    relev_neur_list[probe],
+                    param='choice',
+                    param_condition=condition,
+                    trial_def=trial_def,
+                    trial_timing=trial_timing,
+                )
+
+            mini_dic['peth'] = peth  # not updating this cuz we never use it
+            # (trials x neurons x timebins)
+            if len(relev_neur_list) > 1:
+                conglom_spikes = np.hstack([spike_counts, spike_counts1])
+                print('spike_counts CONGLOM.shape: ', conglom_spikes.shape)
+                mini_dic['spike_counts'] = conglom_spikes
+                mini_dic['trial_data'] = trial_data
+            else:
+                mini_dic['spike_counts'] = spike_counts
+                mini_dic['trial_data'] = trial_data
+
             dic[condition] = mini_dic
         region_2_data[region] = dic
 
@@ -203,8 +270,12 @@ def get_data_array():
             for condition in [-1, 1]:
                 spike_counts = recording[ex_roi][condition]['spike_counts']
                 if spike_counts.shape[1] < 1:
-                    spike_counts = -1 * np.ones((recording[ex_roi][condition]['trial_data']['choices'].shape[0], 5, T))
-                    num_blank_trials += recording[ex_roi][condition]['trial_data']['choices'].shape[0]
+                    spike_counts = -1 * np.ones(
+                        (recording[ex_roi][condition]['trial_data']['choices'].shape[0], 5, T)
+                    )
+                    num_blank_trials += (
+                        recording[ex_roi][condition]['trial_data']['choices'].shape[0]
+                    )
 
                 dat = np.mean(spike_counts, axis=1)  # averaging over neurons
 
