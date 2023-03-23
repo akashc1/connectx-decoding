@@ -14,7 +14,7 @@ from util.data import get_data_array, ROIS
 from dataset import MovementDataset
 
 
-def get_data(regions=None, batch_size=16):
+def get_data(regions=None):
     all_input, all_output = get_data_array()
     xtr, xts, ytr, yts = train_test_split(all_input, all_output, test_size=0.1, shuffle=True)
     tr_dataset = MovementDataset(list(zip(xtr, ytr)))
@@ -26,7 +26,7 @@ def get_data(regions=None, batch_size=16):
 def train_one_epoch(model, optimizer, train_dataloader, log_writer, epoch, log_loss_every=5):
 
     losses = []
-    for step, (x, y) in enumerate(tqdm(train_dataloader)):
+    for step, (x, y) in enumerate(train_dataloader):
         x, y = x.to(DEVICE).float(), y.to(DEVICE)
         y.masked_fill_(y < 0, 0)  # {-1, 1} -> {0, 1} for BCE loss
 
@@ -53,7 +53,7 @@ def train_one_epoch(model, optimizer, train_dataloader, log_writer, epoch, log_l
 def run_testing(model, test_dataloader):
     model.eval()
     preds, gt = [], []
-    for step, (x, y) in enumerate(tqdm(test_dataloader, desc='Test loop')):
+    for step, (x, y) in enumerate(test_dataloader):
         x, y = x.to(DEVICE).float(), y.to(DEVICE)
         logits = model(x).view(-1)
 
@@ -72,9 +72,12 @@ def main(args: argparse.Namespace):
     model = MovementPredictor(
         num_regions=len(ROIS),
         use_connectome_attn_weights=args.use_connectome_weights,
+        hidden_dim=512,
+        num_convs=1,
+        attn_hidden_dim=256,
     ).to(DEVICE)
 
-    optimizer = torch.optim.SGD(
+    optimizer = torch.optim.Adam(
         model.parameters(),
         args.learning_rate,
         weight_decay=args.weight_decay,
@@ -107,10 +110,10 @@ def main(args: argparse.Namespace):
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument('-c', '--use-connectome-weights', action='store_true')
-    p.add_argument('-e', '--num-epochs', default=20, type=int)
+    p.add_argument('-e', '--num-epochs', default=100, type=int)
     p.add_argument('-s', '--random-seed', default=42, type=int)
-    p.add_argument('-b', '--batch-size', default=64, type=int)
-    p.add_argument('-lr', '--learning-rate', default=3e-4, type=float, help='Learning rate')
+    p.add_argument('-b', '--batch-size', default=256, type=int)
+    p.add_argument('-lr', '--learning-rate', default=1e-3, type=float, help='Learning rate')
     p.add_argument('-w', '--weight-decay', default=0, type=float, help='Weight decay')
     p.add_argument('-m', '--model-path', default='model.pt', type=str)
     p.add_argument('--train-log-path', default='train_logs.csv')

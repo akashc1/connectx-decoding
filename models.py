@@ -126,12 +126,12 @@ class MovementPredictor(nn.Module):
         """
         B, num_regions, d_time = x.shape
         assert num_regions == self.region_embed.weight.shape[0]
-        x = x.view(-1, 1, d_time)
+        x = x.view(-1, 1, d_time)  # (B * R, 1, T)
 
         for c in (self.initial_conv, F.relu, self.convs):
             x = c(x)
 
-        x = x.view(B, num_regions, -1)
+        x = x.view(B, num_regions, -1)  # (B * R, C, T) -> (B, R, C * T)
         x = F.relu(self.pre_attn_proj(x))
         x = x + self.region_embed(torch.arange(num_regions).to(x.device))[None, ...]
         x = F.relu(self.attn(x))
