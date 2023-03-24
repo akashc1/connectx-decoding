@@ -111,7 +111,7 @@ def main(args: argparse.Namespace):
             ts_writer.writerow({'epoch': e, 'test_accuracy': acc})
             print(f"Epoch {e}: test accuracy {acc:.3f}")
 
-    save_model(model, args.model_path)
+    save_model(model, job_desc + '_' + args.model_path)
 
 
 def parse_args():
