@@ -84,6 +84,8 @@ def main(args: argparse.Namespace):
         attn_hidden_dim=256,
         t_in=int(6 / args.time_bin_width),  # 3 seconds total duration, divided by specified width
     ).to(DEVICE)
+    num_params = sum(p.numel() for p in model.parameters())
+    print(f"Model has {num_params:,} parameters")
 
     optimizer = torch.optim.Adam(
         model.parameters(),
