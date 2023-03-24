@@ -48,7 +48,7 @@ class RegionAttention(nn.Module):
 
         if use_custom_weights:
             custom_weights = get_connectome_weights()
-            self.attn_mask = torch.tensor(custom_weights, requires_grad=False)
+            self.register_buffer('attn_mask', torch.tensor(custom_weights, requires_grad=False))
         else:
             self.key_proj = nn.Linear(d_in, d_hidden)
             self.query_proj = nn.Linear(d_in, d_hidden)
@@ -60,6 +60,7 @@ class RegionAttention(nn.Module):
         val = self.val_proj(x)
 
         if self.use_custom_weights:
+            # Here `attn_mask` is the mask that accounts for padding, self.attn_mask is attn weights
             val = val * attn_mask.byte() if attn_mask is not None else val
             return self.out_proj(self.attn_mask @ val)
 

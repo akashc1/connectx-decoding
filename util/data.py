@@ -316,7 +316,7 @@ if __name__ == '__main__':
         silent=True,
     )
     ba = AllenAtlas()
-    all_inputs, all_outputs = get_data_array(0.01)
+    all_inputs, all_outputs = get_data_array(0.005)
     print(f"{all_inputs.shape=}, {all_outputs.shape=}")
     X_train, X_test, y_train, y_test = train_test_split(all_inputs, all_outputs, test_size=0.2)
     clf = svm.SVC(kernel='rbf')
