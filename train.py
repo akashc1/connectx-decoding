@@ -69,6 +69,12 @@ def run_testing(model, test_dataloader):
 
 def main(args: argparse.Namespace):
 
+    job_desc = (
+        f'lr{args.learning_rate}_bs{args.batch_size}_wd{args.weight_decay}_'
+        f'connx{int(args.use_connectome_weights)}'
+    )
+    print(f"Job identifier: {job_desc}")
+
     set_seed(args.random_seed)
     model = MovementPredictor(
         num_regions=len(ROIS),
@@ -89,8 +95,8 @@ def main(args: argparse.Namespace):
     test_dl = DataLoader(ts_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
     with (
-        open(args.train_log_path, 'w') as tr_log_fh,
-        open(args.test_log_path, 'w') as ts_log_fh,
+        open(job_desc + '_' + args.train_log_path, 'w') as tr_log_fh,
+        open(job_desc + '_' + args.test_log_path, 'w') as ts_log_fh,
     ):
         tr_writer = csv.DictWriter(tr_log_fh, ['step', 'train_loss', 'grad_norm'])
         ts_writer = csv.DictWriter(ts_log_fh, ['epoch', 'test_accuracy'])
