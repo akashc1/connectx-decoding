@@ -12,6 +12,9 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn import metrics
 
+
+from util.misc import set_seed
+
 ROIS = ['STRv', 'STRd', 'MOp', 'MOs']
 EIDS = [
     'ee8b36de-779f-4dea-901f-e0141c95722b',
@@ -228,22 +231,22 @@ def get_data_per_recording(
     return region_2_data
 
 
-def get_all_recording_data():
+def get_all_recording_data(t_width_s=0.05):
     whole_dataset = {}
     for eid in EIDS:
-        region_2_dat = get_data_per_recording(eid, ROIS)
+        region_2_dat = get_data_per_recording(eid, ROIS, trial_def=(3, 3, t_width_s))
         whole_dataset[eid] = region_2_dat
 
     return whole_dataset
 
 
-def get_data_array():
-    if (raw_data_pkl := Path.cwd() / 'data' / 'raw_data.pkl').exists():
+def get_data_array(t_width_s=0.05):
+    if (raw_data_pkl := Path.cwd() / 'data' / f'raw_data_t{t_width_s}.pkl').exists():
         print(f"Loading cached data from {str(raw_data_pkl)}")
         with open(raw_data_pkl, 'rb') as f:
             eid_to_data = pickle.load(f)
     else:
-        eid_to_data = get_all_recording_data()
+        eid_to_data = get_all_recording_data(t_width_s=t_width_s)
         print(f"Writing data to cache at {str(raw_data_pkl)}")
         with open(raw_data_pkl, 'wb') as f:
             pickle.dump(eid_to_data, f)
@@ -304,6 +307,7 @@ def get_data_array():
 
 
 if __name__ == '__main__':
+    set_seed(42)
     Path('data').mkdir(exist_ok=True)  # used for caching IBL data
     one = ONE(
         cache_dir='data',
@@ -312,7 +316,7 @@ if __name__ == '__main__':
         silent=True,
     )
     ba = AllenAtlas()
-    all_inputs, all_outputs = get_data_array()
+    all_inputs, all_outputs = get_data_array(0.01)
     print(f"{all_inputs.shape=}, {all_outputs.shape=}")
     X_train, X_test, y_train, y_test = train_test_split(all_inputs, all_outputs, test_size=0.2)
     clf = svm.SVC(kernel='rbf')

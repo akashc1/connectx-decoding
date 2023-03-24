@@ -14,8 +14,8 @@ from util.data import get_data_array, ROIS
 from dataset import MovementDataset
 
 
-def get_data(regions=None):
-    all_input, all_output = get_data_array()
+def get_data(t_width_s=0.05, regions=None):
+    all_input, all_output = get_data_array(t_width_s=t_width_s)
     xtr, xts, ytr, yts = train_test_split(all_input, all_output, test_size=0.1, shuffle=True)
     tr_dataset = MovementDataset(list(zip(xtr, ytr)))
     ts_dataset = MovementDataset(list(zip(xts, yts)))
@@ -71,17 +71,17 @@ def main(args: argparse.Namespace):
 
     job_desc = (
         f'lr{args.learning_rate}_bs{args.batch_size}_wd{args.weight_decay}_'
-        f'connx{int(args.use_connectome_weights)}'
+        f'connx{int(args.use_connectome_weights)}_t{args.time_bin_width}'
     )
     print(f"Job identifier: {job_desc}")
 
-    set_seed(args.random_seed)
     model = MovementPredictor(
         num_regions=len(ROIS),
         use_connectome_attn_weights=args.use_connectome_weights,
         hidden_dim=512,
         num_convs=1,
         attn_hidden_dim=256,
+        t_in=int(6 / args.time_bin_width),  # 3 seconds total duration, divided by specified width
     ).to(DEVICE)
 
     optimizer = torch.optim.Adam(
@@ -90,7 +90,7 @@ def main(args: argparse.Namespace):
         weight_decay=args.weight_decay,
     )
 
-    tr_dataset, ts_dataset = get_data()
+    tr_dataset, ts_dataset = get_data(args.time_bin_width)
     train_dl = DataLoader(tr_dataset, batch_size=args.batch_size, num_workers=4)
     test_dl = DataLoader(ts_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
@@ -123,6 +123,7 @@ def parse_args():
     p.add_argument('-lr', '--learning-rate', default=1e-3, type=float, help='Learning rate')
     p.add_argument('-w', '--weight-decay', default=0, type=float, help='Weight decay')
     p.add_argument('-m', '--model-path', default='model.pt', type=str)
+    p.add_argument('-t', '--time-bin-width', default=0.05, type=float, help='Time bin width (s)')
     p.add_argument('--train-log-path', default='train_logs.csv')
     p.add_argument('--test-log-path', default='test_logs.csv')
 
@@ -131,6 +132,7 @@ def parse_args():
 
 if __name__ == '__main__':
     ARGS = parse_args()
+    set_seed(ARGS.random_seed)
     assert torch.cuda.is_available() and torch.cuda.device_count() == 1
     DEVICE = torch.device('cuda')
     main(ARGS)
