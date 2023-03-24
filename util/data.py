@@ -23,6 +23,14 @@ EIDS = [
 ]
 FAMILY_DIC = {'MOp': [], 'STRd': ['CP'], 'STRv': ['ACB', 'FS']}
 
+# Global IBL data helpers
+one = ONE(
+    cache_dir='data',
+    base_url='https://openalyx.internationalbrainlab.org',
+    password='international',
+    silent=True,
+)
+ba = AllenAtlas()
 
 def remove_nans(lis, indices):
     tes = np.array([[i, val] for i, val in enumerate(lis)])
@@ -309,13 +317,6 @@ def get_data_array(t_width_s=0.05):
 if __name__ == '__main__':
     set_seed(42)
     Path('data').mkdir(exist_ok=True)  # used for caching IBL data
-    one = ONE(
-        cache_dir='data',
-        base_url='https://openalyx.internationalbrainlab.org',
-        password='international',
-        silent=True,
-    )
-    ba = AllenAtlas()
     all_inputs, all_outputs = get_data_array(0.005)
     print(f"{all_inputs.shape=}, {all_outputs.shape=}")
     X_train, X_test, y_train, y_test = train_test_split(all_inputs, all_outputs, test_size=0.2)

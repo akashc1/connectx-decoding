@@ -31,8 +31,8 @@ def train_one_epoch(model, optimizer, train_dataloader, log_writer, epoch, log_l
         y.masked_fill_(y < 0, 0)  # {-1, 1} -> {0, 1} for BCE loss
 
         optimizer.zero_grad()
-        logits = model(x).view(-1)
-        loss = F.binary_cross_entropy_with_logits(logits, y.view(-1), reduction='mean')
+        logits, _ = model(x)  # Model passes back attention weights, don't need here
+        loss = F.binary_cross_entropy_with_logits(logits.view(-1), y.view(-1), reduction='mean')
 
         loss.backward()
 
@@ -55,7 +55,8 @@ def run_testing(model, test_dataloader):
     preds, gt = [], []
     for step, (x, y) in enumerate(test_dataloader):
         x, y = x.to(DEVICE).float(), y.to(DEVICE)
-        logits = model(x).view(-1)
+        logits, _ = model(x)
+        logits = logits.view(-1)
 
         pred = torch.zeros_like(logits).byte()
         pred.masked_fill_(logits < 0, -1)
