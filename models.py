@@ -74,7 +74,7 @@ class RegionAttention(nn.Module):
         attn_scores = F.softmax(raw_scores, -1)
         out = (attn_scores @ v).transpose(1, 2).contiguous().view(B, R, self.d_hidden)
 
-        return self.out_proj(out)
+        return self.out_proj(out), attn_scores
 
 
 class MovementPredictor(nn.Module):
@@ -135,6 +135,7 @@ class MovementPredictor(nn.Module):
         x = x.view(B, num_regions, -1)  # (B * R, C, T) -> (B, R, C * T)
         x = F.relu(self.pre_attn_proj(x))
         x = x + self.region_embed(torch.arange(num_regions).to(x.device))[None, ...]
-        x = F.relu(self.attn(x))
+        x, attn_scores = self.attn(x)
+        x = F.relu(x)
         x = F.gelu(self.mlp(x))
-        return self.final_proj(x.flatten(-2))
+        return self.final_proj(x.flatten(-2)), attn_scores

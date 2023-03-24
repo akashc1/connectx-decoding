@@ -8,10 +8,10 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from models import MovementPredictor
-from util.misc import set_seed, save_model, grad_norm
-from util.data import get_data_array, ROIS
 from dataset import MovementDataset
+from models import MovementPredictor
+from util.data import ROIS, get_data_array
+from util.misc import grad_norm, save_model, set_seed
 
 
 def get_data(t_width_s=0.05, regions=None):
