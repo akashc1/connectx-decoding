@@ -68,6 +68,7 @@ def run_testing(model, test_dataloader):
 
 
 def main(args: argparse.Namespace):
+
     set_seed(args.random_seed)
     model = MovementPredictor(
         num_regions=len(ROIS),

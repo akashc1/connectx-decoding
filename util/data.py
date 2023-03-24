@@ -124,16 +124,17 @@ def check_num_ses(list_of_eids):
     return len(list(roi_intersection))
 
 
-def is_child_of(child, parent, family_dictionary=FAMILY_DIC):
+def is_child_of(child, parent, family_dictionary=None):
+    family_dictionary = family_dictionary or FAMILY_DIC
+
     if parent in child:
         return True
 
     if parent not in family_dictionary.keys():
         return False
-    elif child in family_dictionary[parent]:
+    if child in family_dictionary[parent]:
         return True
-    else:
-        return False
+    return False
 
 
 def get_connectome_weights(file='proj_strengths.xlsx'):
@@ -200,7 +201,7 @@ def get_data_per_recording(
 
             if len(relev_neur_list) > 1:
                 probe = 1
-                peth1, spike_counts1, trial_data1 = get_matrices(
+                _, spike_counts1, _ = get_matrices(
                     trials,
                     datalist[probe][0],
                     relev_neur_list[probe],
